@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 export const SCOPES = ['Notes.ReadWrite', 'offline_access'] as const;
 
@@ -27,9 +27,23 @@ const APP_DIR_NAME = 'onenote-mcp';
 
 const TOKEN_CACHE_FILENAME = 'tokens.json';
 
+/**
+ * Overrides the directory holding tokens.json.
+ *
+ * Accepts an absolute path, or a bare name resolved under `<config base>/`. When
+ * unset the default stays `onenote-mcp`, so this fork transparently reuses the
+ * token cache written by the upstream server. Set it alongside a separate
+ * ONENOTE_MCP_CLIENT_ID to run both servers with fully independent logins.
+ */
+export const CONFIG_DIR_ENV = 'ONENOTE_MCP_CONFIG_DIR';
+
 export const getConfigDir = (): string => {
   const xdg = process.env.XDG_CONFIG_HOME;
   const base = xdg && xdg.length > 0 ? xdg : join(homedir(), '.config');
+  const override = process.env[CONFIG_DIR_ENV]?.trim();
+  if (override && override.length > 0) {
+    return isAbsolute(override) ? override : join(base, override);
+  }
   return join(base, APP_DIR_NAME);
 };
 

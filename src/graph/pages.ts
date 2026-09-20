@@ -1,4 +1,4 @@
-import { graphRequest, paginate } from './client.js';
+import { graphRequest, graphRequestRaw, paginate, paginateUntil } from './client.js';
 import type { Page } from './types.js';
 
 const PAGE_SELECT =
@@ -120,4 +120,95 @@ export const updatePage = async (
     body: JSON.stringify(sanitized),
     parse: 'none',
   });
+};
+
+/**
+ * Metadata-only page select for listing.
+ *
+ * Parent notebook/section are deliberately omitted: with a section-scoped query
+ * the caller already knows both, and dropping them lets us add `$orderby`
+ * without betting on `$expand` + `$orderby` being accepted together.
+ */
+const PAGE_LIST_SELECT = 'id,title,createdDateTime,lastModifiedDateTime,contentUrl,links';
+
+export type PageOrderBy = 'title' | 'lastModified' | 'created';
+
+export type SortOrder = 'asc' | 'desc';
+
+export interface ListPagesOptions {
+  limit?: number;
+  orderBy?: PageOrderBy;
+  order?: SortOrder;
+}
+
+const orderByField = (orderBy: PageOrderBy): string => {
+  switch (orderBy) {
+    case 'title':
+      return 'title';
+    case 'created':
+      return 'createdDateTime';
+    default:
+      return 'lastModifiedDateTime';
+  }
+};
+
+/**
+ * Pages of one section, newest-first by default.
+ *
+ * Ordering is done server-side and pagination stops as soon as `limit` rows are
+ * collected, so asking for the 10 most recent pages of a 500-page section costs
+ * one request rather than eleven.
+ */
+export const listPagesInSection = (
+  sectionId: string,
+  options: ListPagesOptions = {},
+): Promise<Page[]> => {
+  const { limit = 50, orderBy = 'lastModified', order = 'desc' } = options;
+  return paginateUntil<Page>(
+    `/me/onenote/sections/${encodeURIComponent(sectionId)}/pages`,
+    limit,
+    {
+      query: {
+        $select: PAGE_LIST_SELECT,
+        $orderby: `${orderByField(orderBy)} ${order}`,
+        $top: Math.min(limit, 100),
+      },
+    },
+  );
+};
+
+/** Every page of one section (metadata only) — used by whole-section scans. */
+export const listAllPagesInSection = (sectionId: string): Promise<Page[]> =>
+  paginate<Page>(`/me/onenote/sections/${encodeURIComponent(sectionId)}/pages`, {
+    query: { $select: PAGE_LIST_SELECT, $top: 100 },
+  });
+
+export interface CopyPageResult {
+  /** 202 for an accepted async copy; Graph completes the job shortly after. */
+  status: number;
+  /** `Operation-Location` header, when Graph returns one, for polling the job. */
+  operationUrl?: string;
+}
+
+/**
+ * Copy a page into another section (Graph `copyToSection`).
+ *
+ * This is a copy, never a move — the source page is untouched. Moving is
+ * intentionally not offered: Graph has no move endpoint, so a move is
+ * copy-then-delete, and that delete is irreversible.
+ */
+export const copyPageToSection = async (
+  pageId: string,
+  targetSectionId: string,
+): Promise<CopyPageResult> => {
+  const { status, headers } = await graphRequestRaw(
+    `/me/onenote/pages/${encodeURIComponent(pageId)}/copyToSection`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: targetSectionId }),
+    },
+  );
+  // Headers.get is case-insensitive, so one lookup covers both spellings.
+  return { status, operationUrl: headers.get('operation-location') ?? undefined };
 };

@@ -5,18 +5,20 @@ import { runServer, SERVER_VERSION } from './index.js';
 import { getHttpHost, getHttpPort, getHttpToken } from './config.js';
 import { startHttpServer } from './http/server.js';
 
-const HELP = `onenote-mcp v${SERVER_VERSION}
+const HELP = `onenote-plus-mcp v${SERVER_VERSION}
+
+Personal fork of onenote-mcp — see FORK.md for what was added.
 
 Usage:
-  onenote-mcp                          Run the MCP server over stdio (default).
-  onenote-mcp --transport http         Run the MCP server over HTTP at /mcp.
+  onenote-plus-mcp                     Run the MCP server over stdio (default).
+  onenote-plus-mcp --transport http    Run the MCP server over HTTP at /mcp.
                                        Requires ONENOTE_MCP_HTTP_TOKEN.
-  onenote-mcp login                    Sign in via Microsoft device-code flow
+  onenote-plus-mcp login               Sign in via Microsoft device-code flow
                                        and cache the refresh token at
                                        ~/.config/onenote-mcp/tokens.json.
-  onenote-mcp logout                   Remove cached tokens and sign out.
-  onenote-mcp --help                   Show this help.
-  onenote-mcp --version                Print the version.
+  onenote-plus-mcp logout              Remove cached tokens and sign out.
+  onenote-plus-mcp --help              Show this help.
+  onenote-plus-mcp --version           Print the version.
 
 HTTP transport flags:
   --transport <stdio|http>             Transport to use. Default: stdio.
@@ -29,6 +31,10 @@ Environment:
   ONENOTE_MCP_TENANT_ID                (optional) Tenant ID; defaults to
                                        /common which works for personal + work
                                        accounts.
+  ONENOTE_MCP_CONFIG_DIR               (optional) Directory holding tokens.json.
+                                       Absolute path, or a name under the config
+                                       base. Defaults to \`onenote-mcp\`, i.e.
+                                       the same cache the upstream server uses.
   ONENOTE_MCP_HTTP_TOKEN               (required for --transport http) Shared
                                        bearer token clients must send as
                                        \`Authorization: Bearer <token>\`.

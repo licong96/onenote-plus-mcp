@@ -20,6 +20,11 @@ export const listSections = (notebookId?: string): Promise<Section[]> => {
   });
 };
 
+export const getSection = (sectionId: string): Promise<Section> =>
+  graphRequest<Section>(`/me/onenote/sections/${encodeURIComponent(sectionId)}`, {
+    query: { $select: SECTION_SELECT, $expand: SECTION_EXPAND },
+  });
+
 export interface CreateSectionParent {
   notebookId?: string;
   sectionGroupId?: string;

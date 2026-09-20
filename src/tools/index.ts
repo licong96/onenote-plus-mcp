@@ -10,6 +10,12 @@ import { register as registerCreateNotebook } from './createNotebook.js';
 import { register as registerCreateSection } from './createSection.js';
 import { register as registerListSectionGroups } from './listSectionGroups.js';
 import { register as registerCreateSectionGroup } from './createSectionGroup.js';
+// --- fork additions -------------------------------------------------------
+import { register as registerListPages } from './listPages.js';
+import { register as registerFindPages } from './findPages.js';
+import { register as registerGetNotebookTree } from './getNotebookTree.js';
+import { register as registerCopyPage } from './copyPage.js';
+import { register as registerAuthStatus } from './authStatus.js';
 
 export const registerAllTools = (server: McpServer): void => {
   registerListNotebooks(server);
@@ -23,4 +29,10 @@ export const registerAllTools = (server: McpServer): void => {
   registerCreatePage(server);
   registerUpdatePage(server);
   registerDeletePage(server);
+  // --- fork additions -----------------------------------------------------
+  registerListPages(server);
+  registerFindPages(server);
+  registerGetNotebookTree(server);
+  registerCopyPage(server);
+  registerAuthStatus(server);
 };

@@ -160,7 +160,7 @@ describe('subcommand dispatch', () => {
 
   it.each(['-h', '--help', 'help'])('prints usage for %s', async (flag) => {
     await runCli(flag);
-    expect(stdout).toContain(`onenote-mcp v${VERSION}`);
+    expect(stdout).toContain(`onenote-plus-mcp v${VERSION}`);
     expect(stdout).toContain('Usage:');
     expect(stdout).toContain('--transport <stdio|http>');
     expect(mockRunServer).not.toHaveBeenCalled();

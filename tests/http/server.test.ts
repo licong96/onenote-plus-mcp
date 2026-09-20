@@ -110,7 +110,7 @@ describe('HTTP server', () => {
     };
     expect(body.jsonrpc).toBe('2.0');
     expect(body.id).toBe(1);
-    expect(body.result.serverInfo.name).toBe('onenote-mcp');
+    expect(body.result.serverInfo.name).toBe('onenote-plus-mcp');
   });
 
   it('POST /mcp with valid token + tools/list returns the registered OneNote tools', async () => {

@@ -2,8 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerAllTools } from './tools/index.js';
 
-export const SERVER_NAME = 'onenote-mcp';
-export const SERVER_VERSION = '0.2.0';
+export const SERVER_NAME = 'onenote-plus-mcp';
+export const SERVER_VERSION = '0.3.0';
 
 export const createServer = (): McpServer => {
   const server = new McpServer({

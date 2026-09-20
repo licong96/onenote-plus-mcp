@@ -1,12 +1,12 @@
 {
-  "name": "@atomiclabs97/onenote-mcp",
-  "version": "0.1.1",
-  "description": "MCP server for Microsoft OneNote — read, search, create, and delete pages via Microsoft Graph.",
+  "name": "onenote-plus-mcp",
+  "version": "0.3.0",
+  "description": "Personal fork of onenote-mcp — adds section/notebook page listing, working scoped search, notebook tree, and page copying on top of read/search/create/update/delete.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "onenote-mcp": "./dist/cli.js"
+    "onenote-plus-mcp": "./dist/cli.js"
   },
   "publishConfig": {
     "access": "public"
@@ -20,7 +20,7 @@
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "yarn@1.22.22",
+
   "scripts": {
     "build": "tsc && tsc-alias",
     "dev": "tsc && tsc-alias && concurrently --kill-others-on-fail --names tsc,alias 'tsc --watch --preserveWatchOutput' 'tsc-alias --watch'",
@@ -31,7 +31,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "smoke": "tsx scripts/smoke.ts",
-    "prepublishOnly": "yarn build"
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "mcp",

@@ -83,11 +83,26 @@ const shapeError = async (response: Response): Promise<GraphError> => {
   return new GraphError(message, response.status, code, requestId);
 };
 
-export const graphRequest = async <T = unknown>(
+export interface RawResponse {
+  status: number;
+  headers: Headers;
+  /** Response body as text; empty string for 204s and empty 200s. */
+  text: string;
+}
+
+/**
+ * Same auth / retry / error-shaping as `graphRequest`, but hands back the raw
+ * status, headers, and body instead of a parsed value.
+ *
+ * Needed by operations whose useful answer lives in a response header rather
+ * than the body — e.g. OneNote's `copyToSection`, which replies `202 Accepted`
+ * plus an `Operation-Location` header pointing at the async job.
+ */
+export const graphRequestRaw = async (
   path: string,
   options: RequestOptions = {},
-): Promise<T> => {
-  const { method = 'GET', query, headers = {}, body = null, accept, parse = 'json' } = options;
+): Promise<RawResponse> => {
+  const { method = 'GET', query, headers = {}, body = null, accept } = options;
   const url = buildUrl(path, query);
   const token = await getAccessToken();
 
@@ -103,18 +118,8 @@ export const graphRequest = async <T = unknown>(
     const response = await fetch(url, { method, headers: reqHeaders, body });
 
     if (response.ok) {
-      if (parse === 'none' || response.status === 204) {
-        // Drain body to free socket.
-        await response.arrayBuffer().catch(() => undefined);
-        return undefined as T;
-      }
-      if (parse === 'text') {
-        return (await response.text()) as T;
-      }
-      // Read as text first so empty 200 bodies don't blow up JSON.parse.
-      const text = await response.text();
-      if (text.length === 0) return undefined as T;
-      return JSON.parse(text) as T;
+      const text = response.status === 204 ? '' : await response.text();
+      return { status: response.status, headers: response.headers, text };
     }
 
     const err = await shapeError(response);
@@ -128,6 +133,20 @@ export const graphRequest = async <T = unknown>(
   }
 
   throw lastError ?? new GraphError('Graph request failed after retries', 0);
+};
+
+export const graphRequest = async <T = unknown>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> => {
+  const { parse = 'json' } = options;
+  const { status, text } = await graphRequestRaw(path, options);
+
+  if (parse === 'none' || status === 204) return undefined as T;
+  if (parse === 'text') return text as T;
+  // Read as text first so empty 200 bodies don't blow up JSON.parse.
+  if (text.length === 0) return undefined as T;
+  return JSON.parse(text) as T;
 };
 
 interface PageResponse<T> {
@@ -155,4 +174,32 @@ export const paginate = async <T>(
     pageOptions = undefined;
   }
   return all;
+};
+
+/**
+ * Paginate but stop as soon as `limit` rows are in hand.
+ *
+ * `paginate` always walks every nextLink; that is wasteful when the caller only
+ * wants the first N of a server-side ordered collection (listing the 20 most
+ * recently edited pages out of a 100-page section should not fetch all 100).
+ */
+export const paginateUntil = async <T>(
+  path: string,
+  limit: number,
+  options: RequestOptions = {},
+): Promise<T[]> => {
+  const all: T[] = [];
+  let next: string | undefined = path;
+  let pageOptions: RequestOptions | undefined = options;
+  while (next && all.length < limit) {
+    const page: PageResponse<T> | undefined = await graphRequest<PageResponse<T> | undefined>(
+      next,
+      pageOptions ?? {},
+    );
+    if (!page) break;
+    if (Array.isArray(page.value)) all.push(...page.value);
+    next = page['@odata.nextLink'];
+    pageOptions = undefined;
+  }
+  return all.slice(0, limit);
 };

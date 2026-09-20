@@ -64,6 +64,36 @@ export const getAccessToken = async (): Promise<string> => {
   );
 };
 
+export interface AuthSnapshot {
+  /** Cached MSAL account, if any. */
+  account: AccountInfo | undefined;
+  /** True when a silent token acquisition actually succeeded. */
+  signedIn: boolean;
+  /** Expiry of the access token currently held in cache. */
+  expiresOn: Date | undefined;
+}
+
+/**
+ * Read-only view of the cached sign-in, for `auth_status` diagnostics.
+ *
+ * Deliberately never throws: a diagnostic tool that fails is useless exactly
+ * when you need it. A broken cache reports `signedIn: false` instead.
+ */
+export const getAuthSnapshot = async (): Promise<AuthSnapshot> => {
+  try {
+    const account = await getCachedAccount();
+    if (!account) return { account: undefined, signedIn: false, expiresOn: undefined };
+    const silent = await acquireTokenSilently(account);
+    return {
+      account,
+      signedIn: Boolean(silent?.accessToken),
+      expiresOn: silent?.expiresOn ?? undefined,
+    };
+  } catch {
+    return { account: undefined, signedIn: false, expiresOn: undefined };
+  }
+};
+
 export const login = async (
   notify: DeviceCodeNotifier = DEFAULT_NOTIFIER,
 ): Promise<AccountInfo> => {
