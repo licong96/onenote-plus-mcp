@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { GraphError, graphRequest, paginate } from '@/graph/client.js';
+import { GraphError, graphRequest, graphRequestRaw, paginate, paginateUntil } from '@/graph/client.js';
 import { createPage, searchPages, updatePage, getPage, getPageContent, deletePage } from '@/graph/pages.js';
 import { createNotebook, listNotebooks } from '@/graph/notebooks.js';
 import { createSection, listSections } from '@/graph/sections.js';
@@ -440,5 +440,133 @@ describe('deletePage', () => {
 
     const [url] = fetchMock.mock.calls[0]!;
     expect(String(url)).toContain('id%2Fwith%2Bspecial');
+  });
+});
+
+describe('graphRequestRaw', () => {
+  it('returns status, headers, and raw text instead of parsing', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('', {
+        status: 202,
+        headers: { 'Operation-Location': 'https://graph.microsoft.com/v1.0/operations/op-1' },
+      }),
+    );
+
+    const response = await graphRequestRaw('/me/onenote/pages/p1/copyToSection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'sec-1' }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get('operation-location')).toBe(
+      'https://graph.microsoft.com/v1.0/operations/op-1',
+    );
+    expect(response.text).toBe('');
+  });
+
+  it('returns the unparsed body for JSON responses', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ value: [{ id: 'a' }] }));
+
+    const response = await graphRequestRaw('/me/onenote/notebooks');
+    expect(JSON.parse(response.text)).toEqual({ value: [{ id: 'a' }] });
+  });
+
+  it('does not read a body for 204 responses', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const response = await graphRequestRaw('/me/onenote/pages/p1', { method: 'DELETE' });
+    expect(response.status).toBe(204);
+    expect(response.text).toBe('');
+  });
+
+  it('retries on 429 then succeeds', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('slow down', { status: 429, headers: { 'retry-after': '0' } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    const response = await graphRequestRaw('/me/onenote/notebooks');
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws a shaped GraphError on failure', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { code: 'BadRequest', message: 'nope' } },
+        { status: 400, statusText: 'Bad Request' },
+      ),
+    );
+
+    await expect(graphRequestRaw('/me/onenote/pages')).rejects.toThrow('nope');
+  });
+});
+
+describe('paginateUntil', () => {
+  it('stops after the first page when the limit is already met', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        value: [{ id: 'a' }, { id: 'b' }],
+        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/onenote/next',
+      }),
+    );
+
+    const rows = await paginateUntil<{ id: string }>('/me/onenote/pages', 2);
+
+    expect(rows.map((row) => row.id)).toEqual(['a', 'b']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps walking nextLinks until the limit is satisfied', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          value: [{ id: 'a' }],
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/onenote/next',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          value: [{ id: 'b' }],
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/onenote/next-2',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ value: [{ id: 'c' }, { id: 'd' }] }));
+
+    const rows = await paginateUntil<{ id: string }>('/me/onenote/pages', 3);
+
+    expect(rows.map((row) => row.id)).toEqual(['a', 'b', 'c']);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('slices an overshooting page down to the limit', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ value: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }));
+
+    const rows = await paginateUntil<{ id: string }>('/me/onenote/pages', 2);
+    expect(rows.map((row) => row.id)).toEqual(['a', 'b']);
+  });
+
+  it('stops on an empty page instead of dereferencing undefined', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 200 }));
+
+    await expect(paginateUntil('/me/onenote/pages', 5)).resolves.toEqual([]);
+  });
+
+  it('ignores query overrides once it starts following nextLink', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          value: [{ id: 'a' }],
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/onenote/next?$top=99',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ value: [{ id: 'b' }] }));
+
+    await paginateUntil('/me/onenote/pages', 2, { query: { $top: 1 } });
+
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get('$top')).toBe('1');
+    expect(String(fetchMock.mock.calls[1]![0])).toBe(
+      'https://graph.microsoft.com/v1.0/me/onenote/next?$top=99',
+    );
   });
 });

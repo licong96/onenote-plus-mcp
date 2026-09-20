@@ -101,7 +101,7 @@ cd /Users/liangluyang/Desktop/learning/ai/onenote-plus-mcp
 npm install
 npm run build          # tsc + tsc-alias  → dist/
 npm run typecheck
-npm test               # vitest, 165 tests
+npm test               # vitest, 245 tests (~96% statement coverage)
 node dist/cli.js       # stdio MCP server
 ```
 
@@ -147,3 +147,15 @@ carry the only renames.
 ---
 
 *Created 2026-09-20.*
+
+## Test coverage
+
+The fork's additions are covered by `tests/util/concurrency.test.ts`,
+`tests/graph/tree.test.ts`, `tests/graph/find.test.ts`,
+`tests/graph/pagesList.test.ts`, and `tests/tools/forkTools.test.ts`, plus new
+cases appended to `tests/config.test.ts` (config-dir override) and
+`tests/graph/client.test.ts` (`paginateUntil`, `graphRequestRaw`).
+
+Suite total: 245 tests, 96% statements / 94% branches. The new modules are at
+100% statement coverage apart from `copy_page`'s defensive branch and the
+inherited `auth/index.ts` login/logout paths.

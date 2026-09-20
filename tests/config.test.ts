@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLIENT_ID_ENV,
+  CONFIG_DIR_ENV,
   TENANT_ID_ENV,
   TOKEN_CACHE_ENV,
   getAuthority,
@@ -139,5 +140,48 @@ describe('getTokenCacheSeed', () => {
   it('returns the trimmed value when set', () => {
     process.env[TOKEN_CACHE_ENV] = '  {"token":"abc"}  ';
     expect(getTokenCacheSeed()).toBe('{"token":"abc"}');
+  });
+});
+
+describe('CONFIG_DIR_ENV override', () => {
+  const savedXdg = process.env.XDG_CONFIG_HOME;
+  const savedOverride = process.env[CONFIG_DIR_ENV];
+
+  afterEach(() => {
+    if (savedXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = savedXdg;
+    if (savedOverride === undefined) delete process.env[CONFIG_DIR_ENV];
+    else process.env[CONFIG_DIR_ENV] = savedOverride;
+  });
+
+  it('keeps the shared onenote-mcp directory when the override is unset', () => {
+    delete process.env[CONFIG_DIR_ENV];
+    delete process.env.XDG_CONFIG_HOME;
+    expect(getConfigDir()).toBe(join(homedir(), '.config', 'onenote-mcp'));
+  });
+
+  it('resolves a bare name under the config base', () => {
+    process.env.XDG_CONFIG_HOME = '/custom/config';
+    process.env[CONFIG_DIR_ENV] = 'onenote-plus-mcp';
+    expect(getConfigDir()).toBe(join('/custom/config', 'onenote-plus-mcp'));
+    expect(getTokenCachePath()).toBe(join('/custom/config', 'onenote-plus-mcp', 'tokens.json'));
+  });
+
+  it('uses an absolute path verbatim rather than nesting it under the config base', () => {
+    process.env.XDG_CONFIG_HOME = '/custom/config';
+    process.env[CONFIG_DIR_ENV] = '/elsewhere/tokens';
+    expect(getConfigDir()).toBe('/elsewhere/tokens');
+  });
+
+  it('ignores an empty or whitespace-only override', () => {
+    delete process.env.XDG_CONFIG_HOME;
+    process.env[CONFIG_DIR_ENV] = '   ';
+    expect(getConfigDir()).toBe(join(homedir(), '.config', 'onenote-mcp'));
+  });
+
+  it('trims a padded override', () => {
+    process.env.XDG_CONFIG_HOME = '/custom/config';
+    process.env[CONFIG_DIR_ENV] = '  onenote-other  ';
+    expect(getConfigDir()).toBe(join('/custom/config', 'onenote-other'));
   });
 });
