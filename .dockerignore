@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+dist
+tests
+scripts
+docs
+coverage
+*.tsbuildinfo
+.env
+.env.*
+tokens.json
+.config
+fly.toml
+Dockerfile
+.dockerignore
+*.md

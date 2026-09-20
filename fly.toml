@@ -1,0 +1,38 @@
+# Fly.io deployment template for @atomiclabs97/onenote-mcp.
+# See docs/deployment/fly.md for the full walkthrough.
+#
+# `app` must be globally unique — `fly launch` will pick a name for you, or
+# rename this one. Secrets (ONENOTE_MCP_CLIENT_ID, ONENOTE_MCP_HTTP_TOKEN,
+# ONENOTE_MCP_TOKEN_CACHE) are set with `fly secrets set`, never in this file.
+
+app = "onenote-mcp"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ONENOTE_MCP_HTTP_HOST = "0.0.0.0"
+  ONENOTE_MCP_HTTP_PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "get"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[mounts]
+  source = "onenote_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

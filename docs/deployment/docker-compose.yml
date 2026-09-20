@@ -1,0 +1,25 @@
+# Sample docker-compose for self-hosting onenote-mcp on a VPS or home server.
+# See docs/deployment/docker.md for the walkthrough.
+#
+# Provide the secrets via a .env file next to this one:
+#   ONENOTE_MCP_CLIENT_ID=<entra-app-client-id>
+#   ONENOTE_MCP_HTTP_TOKEN=<openssl rand -base64 32>
+#   ONENOTE_MCP_TOKEN_CACHE=<verbatim contents of a tokens.json from `onenote-mcp login`>
+#   ONENOTE_MCP_TENANT_ID=          # optional
+
+services:
+  onenote-mcp:
+    image: ghcr.io/ahmadalmezaal/onenote-mcp:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      ONENOTE_MCP_CLIENT_ID: ${ONENOTE_MCP_CLIENT_ID:?set in .env}
+      ONENOTE_MCP_HTTP_TOKEN: ${ONENOTE_MCP_HTTP_TOKEN:?set in .env}
+      ONENOTE_MCP_TOKEN_CACHE: ${ONENOTE_MCP_TOKEN_CACHE:-}
+      ONENOTE_MCP_TENANT_ID: ${ONENOTE_MCP_TENANT_ID:-}
+    volumes:
+      - onenote-data:/data
+
+volumes:
+  onenote-data:
