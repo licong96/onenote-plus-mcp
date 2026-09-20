@@ -1,6 +1,7 @@
 import { getPageContent, listAllPagesInSection } from './pages.js';
 import { getSection } from './sections.js';
 import { collectNotebookTree, type SectionNode } from './tree.js';
+import { searchIndex, readIndex, type IndexedPage } from '@/index-store/store.js';
 import { DEFAULT_CONCURRENCY, mapWithConcurrency } from '@/util/concurrency.js';
 import type { Page } from './types.js';
 
@@ -15,9 +16,15 @@ import type { Page } from './types.js';
  * (this account has 172 sections). So `search_pages` — the upstream tool that
  * relies on both — cannot work here.
  *
- * Instead of a broken server-side index, this walks the sections in scope and
- * matches client-side. Titles come free with the page metadata; content
- * requires fetching each page, so it is opt-in and bounded.
+ * Two candidate sources, tried in order:
+ *   1. the local index (~/.config/onenote-mcp/index.json) — instant, offline;
+ *   2. a live per-section scan — correct but expensive (one Graph round trip
+ *      per section, each measured at 2–7s, so an account-wide scan runs into
+ *      minutes and blows past the MCP request timeout).
+ *
+ * The index is therefore the default path and the live scan is the fallback.
+ * Titles come free with page metadata; content requires fetching each page, so
+ * it is opt-in and bounded.
  */
 
 export interface FindPagesOptions {
@@ -28,6 +35,8 @@ export interface FindPagesOptions {
   includeContent?: boolean;
   maxContentPages?: number;
   concurrency?: number;
+  /** Set false to always hit Graph instead of the local index. */
+  useIndex?: boolean;
 }
 
 export interface PageMatch {
@@ -52,6 +61,8 @@ export interface FindPagesResult {
   };
   /** True when the content pass stopped early at `maxContentPages`. */
   contentScanTruncated: boolean;
+  /** Where the candidate pages came from. */
+  source?: 'index' | 'graph';
   notes: string[];
 }
 
@@ -83,6 +94,159 @@ interface ScopedSection {
   notebook?: string;
   section: SectionNode;
 }
+
+interface IndexSearchContext {
+  needle: string;
+  rawQuery: string;
+  options: FindPagesOptions;
+  limit: number;
+  includeContent: boolean;
+  maxContentPages: number;
+  concurrency: number;
+  scope: ScopedSection[];
+  notes: string[];
+}
+
+const inScope = (page: IndexedPage, scope: ScopedSection[]): boolean =>
+  scope.some((entry) => entry.section.id === page.sectionId);
+
+/**
+ * Derive the search scope from the index alone, with no network calls.
+ *
+ * Returns undefined when the caller asked for a notebook or section the index
+ * does not know about — the signal to fall back to a live scan rather than
+ * answer "no matches" from an incomplete mirror.
+ */
+const scopeFromIndexArgs = (
+  index: Parameters<typeof searchIndex>[0],
+  options: FindPagesOptions,
+): ScopedSection[] | undefined => {
+  if (options.sectionId) {
+    const owner = index.notebooks.find((notebook) =>
+      notebook.sections.some((section) => section.id === options.sectionId),
+    );
+    const section = owner?.sections.find((candidate) => candidate.id === options.sectionId);
+    if (!owner || !section) return undefined;
+    return [
+      {
+        notebook: owner.name,
+        section: {
+          id: section.id,
+          name: section.name,
+          isDefault: false,
+          lastModified: section.lastModifiedDateTime,
+          groupPath: section.groupPath,
+        },
+      },
+    ];
+  }
+
+  const notebooks = options.notebookId
+    ? index.notebooks.filter((notebook) => notebook.id === options.notebookId)
+    : index.notebooks;
+  if (notebooks.length === 0) return undefined;
+
+  return notebooks.flatMap((notebook) =>
+    notebook.sections.map((section) => ({
+      notebook: notebook.name,
+      section: {
+        id: section.id,
+        name: section.name,
+        isDefault: false,
+        lastModified: section.lastModifiedDateTime,
+        groupPath: section.groupPath,
+      },
+    })),
+  );
+};
+
+/**
+ * Serve a search entirely from the local index.
+ *
+ * Scope filtering happens against page.sectionId rather than by resolving
+ * notebook/section names, because scope resolution is itself a Graph call and
+ * the index already carries every section it knows about.
+ */
+const searchFromIndex = async (
+  index: Parameters<typeof searchIndex>[0],
+  context: IndexSearchContext,
+): Promise<FindPagesResult> => {
+  const { needle, options, limit, includeContent, maxContentPages, concurrency, scope, notes } =
+    context;
+
+  const scoped = scope.filter((entry) => entry.section.id.length > 0);
+  const candidates = index.pages.filter((page) => inScope(page, scoped));
+
+  const titleMatches = candidates.filter((page) => page.title.toLowerCase().includes(needle));
+  const contentCandidates = includeContent
+    ? candidates.filter((page) => !page.title.toLowerCase().includes(needle))
+    : [];
+
+  const matches: PageMatch[] = titleMatches.map((page) => ({
+    id: page.id,
+    title: page.title,
+    notebook: page.notebookName,
+    section: page.sectionName,
+    groupPath: page.groupPath.length > 0 ? page.groupPath : undefined,
+    lastModified: page.lastModifiedDateTime,
+    webUrl: page.webUrl,
+    matchedIn: 'title',
+  }));
+
+  let contentsFetched = 0;
+  const contentScanTruncated = contentCandidates.length > maxContentPages;
+  if (includeContent) {
+    // Still needs Graph: bodies are not mirrored. Bounded so a broad query
+    // cannot turn into thousands of downloads.
+    const budget = contentCandidates.slice(0, maxContentPages);
+    const results = await mapWithConcurrency(budget, concurrency, async (page) => {
+      try {
+        const text = htmlToText(await getPageContent(page.id));
+        contentsFetched += 1;
+        if (!text.toLowerCase().includes(needle)) return null;
+        return {
+          id: page.id,
+          title: page.title,
+          notebook: page.notebookName,
+          section: page.sectionName,
+          groupPath: page.groupPath.length > 0 ? page.groupPath : undefined,
+          lastModified: page.lastModifiedDateTime,
+          webUrl: page.webUrl,
+          matchedIn: 'content' as const,
+          snippet: snippetAround(text, needle),
+        };
+      } catch {
+        return null;
+      }
+    });
+    for (const result of results) {
+      if (result) matches.push(result);
+    }
+    if (contentScanTruncated) {
+      notes.push(
+        `Content search stopped at ${maxContentPages} pages (${contentCandidates.length} candidates). Narrow the scope or raise maxContentPages.`,
+      );
+    }
+  }
+
+  // Newest-first, matching the live-scan path's ordering.
+  matches.sort((left, right) =>
+    (right.lastModified ?? '').localeCompare(left.lastModified ?? ''),
+  );
+
+  return {
+    matches: matches.slice(0, limit),
+    source: 'index',
+    scanned: {
+      notebooks: new Set(scoped.map((entry) => entry.notebook ?? entry.section.id)).size,
+      sections: scoped.length,
+      pages: candidates.length,
+      contentsFetched,
+    },
+    contentScanTruncated,
+    notes,
+  };
+};
 
 const resolveScope = async (
   options: FindPagesOptions,
@@ -130,8 +294,38 @@ export const findPages = async (options: FindPagesOptions): Promise<FindPagesRes
   );
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
-  const scope = await resolveScope(options, notes);
+  // Preferred path: answer from the local index. Checked BEFORE resolving scope,
+  // because scope resolution itself walks Graph (172 section requests without a
+  // notebook/section hint) — doing it first would pay the full cost the index
+  // exists to avoid, and would trip the rate limiter even on a cache hit.
+  if (options.useIndex !== false) {
+    const index = await readIndex();
+    if (index) {
+      const scopeFromIndex = scopeFromIndexArgs(index, options);
+      if (scopeFromIndex) {
+        return searchFromIndex(index, {
+          needle,
+          rawQuery: options.query,
+          options,
+          limit,
+          includeContent,
+          maxContentPages,
+          concurrency,
+          scope: scopeFromIndex,
+          notes,
+        });
+      }
+      notes.push(
+        'The given notebook/section is not in the local index; fell back to Graph. Run index mode "sync" or "rebuild" to refresh it.',
+      );
+    } else {
+      notes.push(
+        'No local index; fell back to scanning Graph (slow). Run the `index` tool with mode "rebuild" to make this instant.',
+      );
+    }
+  }
 
+  const scope = await resolveScope(options, notes);
   // Pass 1 — titles. Metadata only, one request per section.
   const scannedPerSection = await mapWithConcurrency(
     scope,
@@ -214,6 +408,7 @@ export const findPages = async (options: FindPagesOptions): Promise<FindPagesRes
 
   return {
     matches: matches.slice(0, limit),
+    source: 'graph',
     scanned: {
       notebooks: new Set(scope.map((entry) => entry.notebook ?? entry.section.id)).size,
       sections: scope.length,

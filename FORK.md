@@ -1,8 +1,8 @@
 # FORK.md — onenote-plus-mcp
 
 This is a **personal fork** of [`ahmadAlMezaal/onenote-mcp`](https://github.com/ahmadAlMezaal/onenote-mcp)
-(MIT), branched from commit `894e82b`, and extended with five tools that the
-upstream server does not have.
+(MIT), branched from commit `894e82b`, and extended with a local page index and
+seven tools that the upstream server does not have.
 
 The upstream project stays upstream. Everything below is what this fork adds and
 *why*, so the reasoning survives past the session that produced it.
@@ -39,14 +39,20 @@ Two concrete gaps, both confirmed against the live account (13 notebooks,
 
 | Tool | Purpose |
 | --- | --- |
+| `index` | Maintains the local mirror of the structure. Modes: `status`, `search` (offline), `sync` (incremental), `rebuild`, `rebuildSkeleton`. |
+| `resolve_page` | Turns a page title (optionally with notebook/section) into a real page ID, served from the index and repaired against Graph on a miss. |
 | `list_pages` | Lists pages in a section, or across every section of a notebook. Sorted server-side; no search term required. |
-| `find_pages` | The working search. Scans sections in scope and matches client-side — titles by default, page bodies on request. |
+| `find_pages` | The working search. Served from the local index by default; falls back to a live scan only when the index is absent or does not know the requested scope. |
 | `get_notebook_tree` | Maps notebooks → section groups → sections with IDs. The entry point for discovering every other ID. |
 | `copy_page` | Copies a page into another section (`copyToSection`). Copy only — never moves or deletes. |
 | `auth_status` | Which account is signed in, where the token cache lives, whether the cached token still refreshes. |
 
 Plus supporting infrastructure:
 
+- **Local page index** (`src/index-store/`) — mirrors notebooks, sections, and
+  every page (ID, title, notebook, section, group path, timestamps, URL) to
+  `~/.config/onenote-mcp/index.json`. This is the single biggest change; see the
+  section below for why it is necessary.
 - `paginateUntil` (`src/graph/client.ts`) — paginate but stop once `limit` rows
   are collected, so "10 newest pages of a 500-page section" is one request.
 - `graphRequestRaw` (`src/graph/client.ts`) — same auth/retry/error shaping as
@@ -86,6 +92,78 @@ Plus supporting infrastructure:
 
 ---
 
+## The local index, and why it exists
+
+Measured on this account, **every Graph request costs 2–7 seconds regardless of
+payload size** — listing a 7-page section took 7s, and listing a 10-section
+notebook took 47s. The cost is the round trip, not the data. That makes anything
+that fans out per section (172 sections here) both unusably slow and an instant
+route to HTTP 429.
+
+The structure is also almost entirely static — notebooks and sections rarely
+change; only page *content* moves. So the skeleton and page lists are mirrored
+to one JSON file and served from there:
+
+```
+~/.config/onenote-mcp/index.json   # 13 notebooks / 172 sections / 3087 pages ≈ 2.4 MB
+```
+
+Measured effect: searching "香港" across all 3087 pages went from **11181ms and a
+429 error** to **19ms**.
+
+### Two index keys, deliberately
+
+- **byId** — exact, O(1), used once a page ID is known.
+- **byPath** (notebook + section + title) — because **page IDs are not stable**.
+  Moving or copying a page mints a new ID, so a stored ID can silently 404.
+  The path key is the fallback that reconstructs it.
+
+### Freshness
+
+The index is a cache, not a source of truth. On a miss, resolution verifies
+against Graph and **writes the repair back**, so the next lookup is cheap again.
+Write paths keep it current automatically:
+
+| Operation | Index action |
+| --- | --- |
+| `create_page` | re-sync that section |
+| `delete_page` | drop the entry locally — no network call |
+| `copy_page` | re-sync the target section (new page, new ID) |
+| content edit (`update_page`) | no-op — metadata is unchanged |
+
+All of these are **best-effort**: a failed refresh is reported as
+`{status:'failed'}` but never fails the write itself, because the mutation has
+already happened on Microsoft's side and rolling it back is not an option.
+
+A full rebuild is ~185 requests and measured at **285s** at concurrency 3. Run
+it once; afterwards prefer `sync`, scoped with `sections` when you know what
+changed.
+
+---
+
+## Bugs found by actually running this
+
+Both were invisible to mocked tests and only appeared against live Graph.
+
+**1. Case-sensitivity mismatch in index filters.** The query needle was
+lowercased but the `notebook`/`section` filters were not, so
+`section: "Section B"` matched nothing while `section: "section b"` worked.
+The bad outcome was silent — a normal-looking filter returned zero results and
+read as "the page does not exist". Fixed by lowercasing both sides.
+
+**2. `find_pages` resolved scope before checking the index.** Scope resolution
+itself walks Graph (172 section requests with no hint), so the expensive work
+ran *before* the cache was consulted — paying the exact cost the cache exists to
+avoid, and tripping the rate limiter even on what should have been a cache hit.
+Fixed by checking the index first and deriving scope from it via
+`scopeFromIndexArgs`, with no network calls.
+
+The lesson worth keeping: **a slow-path fallback must be checked *after* the
+fast path, never the reverse.** A cache placed behind an expensive precondition
+is not a cache.
+
+---
+
 ## Layout
 
 ```text
@@ -101,7 +179,7 @@ cd /Users/liangluyang/Desktop/learning/ai/onenote-plus-mcp
 npm install
 npm run build          # tsc + tsc-alias  → dist/
 npm run typecheck
-npm test               # vitest, 245 tests (~96% statement coverage)
+npm test               # vitest, 299 tests (~96% statement coverage)
 node dist/cli.js       # stdio MCP server
 ```
 
@@ -139,10 +217,10 @@ openclaw mcp configure onenoteplus --disable # stand this one down
 ## Syncing with upstream
 
 `onenote-mcp-upstream/` is the untouched clone. New work here is additive:
-five new files under `src/tools/`, one under `src/graph/`, one under `src/util/`,
-and small additive edits elsewhere (noted with `--- fork additions ---`
-comments). `src/tools/index.ts`, `src/index.ts`, `src/cli.ts`, and `package.json`
-carry the only renames.
+seven new files under `src/tools/`, one under `src/graph/`, one under `src/util/`,
+four under `src/index-store/`, and small additive edits elsewhere (noted with
+`--- fork additions ---` comments). `src/tools/index.ts`, `src/index.ts`,
+`src/cli.ts`, and `package.json` carry the only renames.
 
 ---
 
@@ -152,10 +230,11 @@ carry the only renames.
 
 The fork's additions are covered by `tests/util/concurrency.test.ts`,
 `tests/graph/tree.test.ts`, `tests/graph/find.test.ts`,
-`tests/graph/pagesList.test.ts`, and `tests/tools/forkTools.test.ts`, plus new
-cases appended to `tests/config.test.ts` (config-dir override) and
-`tests/graph/client.test.ts` (`paginateUntil`, `graphRequestRaw`).
+`tests/graph/pagesList.test.ts`, `tests/tools/forkTools.test.ts`, and
+`tests/index-store/` (store, sync, resolve, maintain), plus new cases appended to
+`tests/config.test.ts` (config-dir override) and `tests/graph/client.test.ts`
+(`paginateUntil`, `graphRequestRaw`).
 
-Suite total: 245 tests, 96% statements / 94% branches. The new modules are at
+Suite total: **299 tests**, 96% statements / 94% branches. The new modules are at
 100% statement coverage apart from `copy_page`'s defensive branch and the
 inherited `auth/index.ts` login/logout paths.

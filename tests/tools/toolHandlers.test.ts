@@ -400,7 +400,7 @@ describe('delete_page handler', () => {
     const result = parseResult(await handler({ pageId: 'page-42' }));
 
     expect(deletePage).toHaveBeenCalledWith('page-42');
-    expect(result).toEqual({ deleted: true, pageId: 'page-42' });
+    expect(result).toMatchObject({ deleted: true, pageId: 'page-42' });
   });
 });
 

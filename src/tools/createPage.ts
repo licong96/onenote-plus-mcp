@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createPage, type CreatePageAttachment } from '@/graph/pages.js';
 import { htmlToOneNotePage, markdownToOneNoteHtml } from '@/markdown.js';
+import { afterSectionChanged } from '@/index-store/maintain.js';
 
 const PART_NAME_REGEX = /^[A-Za-z0-9._-]+$/;
 const BASE64_REGEX = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -109,6 +110,8 @@ export const register = (server: McpServer): void => {
         ? await loadAttachments(attachments)
         : undefined;
       const page = await createPage({ sectionId, html, attachments: parts });
+      // Refresh that section in the mirror so find/resolve see the new page.
+      const indexUpdate = await afterSectionChanged(sectionId);
       return {
         content: [
           {
@@ -120,6 +123,7 @@ export const register = (server: McpServer): void => {
                 createdDateTime: page.createdDateTime,
                 webUrl: page.links?.oneNoteWebUrl?.href,
                 attachmentCount: parts?.length ?? 0,
+                indexUpdate,
               },
               null,
               2,

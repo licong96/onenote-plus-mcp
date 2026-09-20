@@ -16,6 +16,8 @@ import { register as registerFindPages } from './findPages.js';
 import { register as registerGetNotebookTree } from './getNotebookTree.js';
 import { register as registerCopyPage } from './copyPage.js';
 import { register as registerAuthStatus } from './authStatus.js';
+import { register as registerIndex } from './indexTool.js';
+import { register as registerResolvePage } from './resolvePage.js';
 
 export const registerAllTools = (server: McpServer): void => {
   registerListNotebooks(server);
@@ -35,4 +37,6 @@ export const registerAllTools = (server: McpServer): void => {
   registerGetNotebookTree(server);
   registerCopyPage(server);
   registerAuthStatus(server);
+  registerIndex(server);
+  registerResolvePage(server);
 };

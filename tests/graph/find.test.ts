@@ -10,8 +10,15 @@ vi.mock('../../src/graph/sections.js', () => ({
   getSection: vi.fn(),
 }));
 
+// The index is mocked away for the whole file: these tests exercise the live
+// Graph scan path, and `readIndex` returning undefined is what selects it.
 vi.mock('../../src/graph/tree.js', () => ({
   collectNotebookTree: vi.fn(),
+}));
+
+vi.mock('../../src/index-store/store.js', () => ({
+  readIndex: vi.fn(async () => undefined),
+  searchIndex: vi.fn(),
 }));
 
 import { getPageContent, listAllPagesInSection } from '@/graph/pages.js';

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { copyPageToSection } from '@/graph/pages.js';
 import { getPage } from '@/graph/pages.js';
 import { getSection } from '@/graph/sections.js';
+import { afterPageCopied } from '@/index-store/maintain.js';
 
 const inputSchema = {
   pageId: z.string().min(1).describe('ID of the page to copy.'),
@@ -24,6 +25,11 @@ export const register = (server: McpServer): void => {
       const [page, target] = await Promise.all([getPage(pageId), getSection(targetSectionId)]);
       const result = await copyPageToSection(pageId, targetSectionId);
 
+      // The copy is async (202), so the target section may not list the new page
+      // yet. Refresh anyway: it is idempotent, and a later lookup that misses
+      // will repair itself via resolve_page.
+      const indexUpdate = await afterPageCopied(targetSectionId);
+
       return {
         content: [
           {
@@ -39,6 +45,7 @@ export const register = (server: McpServer): void => {
                   name: target.displayName,
                   notebook: target.parentNotebook?.displayName,
                 },
+                indexUpdate,
                 note:
                   result.status === 202
                     ? 'Graph accepted the copy (202) and finishes it asynchronously — the new page appears in the target section shortly.'

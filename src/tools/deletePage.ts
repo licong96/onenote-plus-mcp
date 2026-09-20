@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { deletePage } from '@/graph/pages.js';
+import { afterPageRemoved } from '@/index-store/maintain.js';
 
 const inputSchema = {
   pageId: z.string().min(1).describe('OneNote page ID to delete. This action is irreversible.'),
@@ -21,11 +22,13 @@ export const register = (server: McpServer): void => {
     },
     async ({ pageId }) => {
       await deletePage(pageId);
+      // Drop it from the mirror right away; the deletion is authoritative.
+      const indexUpdate = await afterPageRemoved(pageId);
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({ deleted: true, pageId }, null, 2),
+            text: JSON.stringify({ deleted: true, pageId, indexUpdate }, null, 2),
           },
         ],
       };
