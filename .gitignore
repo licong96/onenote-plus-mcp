@@ -22,8 +22,10 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
-# Token cache (defensive — normally lives at ~/.config/onenote-mcp/, outside the repo)
+# Local cache (defensive — normally lives at ~/.config/onenote-mcp/, outside the repo)
 tokens.json
+index.json
+index.json.*.tmp
 .config/onenote-mcp/
 
 # Editor / OS
